@@ -23,3 +23,6 @@ lxml
 PyBrowserID
 # WebOb is used for Accept header parsing
 webob==1.2.2
+# For wordpress export
+phpserialize==1.3
+
