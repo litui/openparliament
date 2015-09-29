@@ -14,7 +14,17 @@ DATABASES = {
         'HOST': '',                      # Set to empty string for localhost. Not used with sqlite3.
         'PORT': '',                      # Set to empty string for default. Not used with sqlite3.
     },
+    'wordpress': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'wordpress',
+        'USER': '',
+        'PASSWORD': '',
+        'HOST': '',
+        'PORT': ''
+    }
 }
+
+DATABASE_ROUTERS = ['parliament.wordpress.router.WordpressRouter']
 
 HANSARD_CACHE_DIR = os.path.join(PROJ_ROOT, 'hansard-cache')
 SITE_URL='http://openparliament.ca'

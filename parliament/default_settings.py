@@ -126,6 +126,7 @@ INSTALLED_APPS = [
     'parliament.committees',
     'parliament.search',
     'parliament.text_analysis',
+    'parliament.wordpress'
 ]
 
 THUMBNAIL_SUBDIR = '_thumbs'

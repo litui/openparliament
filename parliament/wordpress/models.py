@@ -515,8 +515,3 @@ class Taxonomy(WordPressModel):
 
     #def term(self):
     #    return self._get_object(Term, self.term_id)
-
-
-# Custom fields
-class ACFGroup(Post):
-

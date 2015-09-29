@@ -1,4 +1,3 @@
-import json
 import phpserialize
 from optparse import make_option
 
@@ -13,11 +12,6 @@ POST_TYPE_CHOICES.extend([(t, t) for t in REQUIRED_POST_TYPES])
 class Command(BaseCommand):
     help = "Does something with wordpress."
     args = '[task]'
-
-    # option_list = BaseCommand.option_list + (
-    #     make_option('--check', action='store_true', dest='check',
-    #                 help='Check if everything is in place as needed in wordpress.'),
-    # )
 
     def _wp_check(self):
         """ Checks Wordpress schema and data."""
@@ -40,12 +34,8 @@ class Command(BaseCommand):
                 raise CommandError('Required custom post type "{}" not found.'.format(reqtype))
 
         cf_groups = Post.objects.filter(status='publish', post_type='acf').select_related('meta')
-        for cf_grp in cf_groups:
 
-
-
-
-        pass
+        # TODO: Continue check function
 
     def handle(self, *args, **options):
         if not args:
