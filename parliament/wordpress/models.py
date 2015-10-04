@@ -1,5 +1,5 @@
 # from sunlightlabs/django-wordpress
-
+import phpserialize
 import collections
 import datetime
 
@@ -99,7 +99,10 @@ class OptionManager(WordPressManager):
     def get_value(self, name):
         try:
             o = self.get(name=name)
-            return o.value
+            try:
+                return phpserialize.loads(o.value)
+            except ValueError:
+                return o.value
         except ObjectDoesNotExist:
             pass
 
@@ -406,6 +409,15 @@ class PostMeta(WordPressModel):
     post = models.ForeignKey(Post, related_name='meta', db_column='post_id')
     key = models.CharField(max_length=255, db_column='meta_key')
     value = models.TextField(db_column='meta_value')
+
+    def get_value(self):
+        try:
+            try:
+                return phpserialize.loads(self.value)
+            except ValueError:
+                return self.value
+        except ObjectDoesNotExist:
+            pass
 
     class Meta:
         db_table = '%s_postmeta' % TABLE_PREFIX
