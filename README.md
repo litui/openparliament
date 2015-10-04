@@ -1,5 +1,8 @@
 A site that scrapes and republishes information on Canada's House of Commons.
 
+This branch is for a work-in-progress selective export-to-wordpress
+capability for use with Custom Post Type UI and Advanced Custom Fields.
+
 License
 =======
 
