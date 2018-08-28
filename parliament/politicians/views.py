@@ -10,7 +10,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator, InvalidPage, EmptyPage
 from django.http import HttpResponse, Http404, HttpResponsePermanentRedirect
 from django.shortcuts import get_object_or_404
-from django.template import loader, RequestContext
+from django.template import loader
 from django.views.decorators.vary import vary_on_headers
 
 from parliament.activity.models import Activity
@@ -28,32 +28,56 @@ class CurrentMPView(ModelListView):
 
     resource_name = 'Politicians'
 
-    default_limit = 308
+    default_limit = 338
+
+    # The API stuff here is a bit of a hack: because of the database schema, it makes sense
+    # to internally use ElectedMembers in order to add more fields to the default response,
+    # but for former politicians we use Politician objects, so... hacking.
+    def _politician_prepend_filter(field_name, help):
+        def inner(qs, *args, **kwargs):
+            if qs.model == Politician:
+                return APIFilters.dbfield(field_name)(qs, *args, **kwargs)
+            else:
+                return APIFilters.dbfield('politician__' + field_name)(qs, *args, **kwargs)
+        inner.help = help
+        return inner
 
     filters = {
-        'name': APIFilters.dbfield(help='e.g. Stephen Harper'),
-        'family_name': APIFilters.dbfield('name_family', help='e.g. Harper'),
-        'given_name': APIFilters.dbfield('name_given', help='e.g. Stephen'),
+        'name': _politician_prepend_filter('name', help='e.g. Stephen Harper'),
+        'family_name': _politician_prepend_filter('name_family', help='e.g. Harper'),
+        'given_name': _politician_prepend_filter('name_given', help='e.g. Stephen'),
         'include': APIFilters.noop(help="'former' to show former MPs (since 94), 'all' for current and former")
     }
 
-    def get_qs(self, request):
-        if request.GET.get('include') == 'former':
-            qs = Politician.objects.elected_but_not_current()
-        elif request.GET.get('include') == 'all':
-            qs = Politician.objects.elected()
+    def get_qs(self, request=None):
+        if request and request.GET.get('include') == 'former':
+            qs = Politician.objects.elected_but_not_current().order_by('name_family')
+        elif request and request.GET.get('include') == 'all':
+            qs = Politician.objects.elected().order_by('name_family')
         else:
-            qs = Politician.objects.current()
-        return qs.order_by('name_family')
+            qs = ElectedMember.objects.current().order_by(
+                'riding__province', 'politician__name_family').select_related('politician', 'riding', 'party')
+        return qs
+
+    def object_to_dict(self, obj):
+        if isinstance(obj, ElectedMember):
+            return dict(
+                name=obj.politician.name,
+                url=obj.politician.get_absolute_url(),
+                current_party={"short_name": {"en": obj.party.short_name}},
+                current_riding={"province": obj.riding.province, "name": {"en": obj.riding.dashed_name}},
+                image=obj.politician.headshot.url if obj.politician.headshot else None,
+            )
+        else:
+            return super(CurrentMPView, self).object_to_dict(obj)
 
     def get_html(self, request):
         t = loader.get_template('politicians/electedmember_list.html')
-        c = RequestContext(request, {
-            'object_list': ElectedMember.objects.current().order_by(
-                'riding__province', 'politician__name_family').select_related('politician', 'riding', 'party'),
+        c = {
+            'object_list': self.get_qs(),
             'title': 'Current Members of Parliament'
-        })
-        return HttpResponse(t.render(c))
+        }
+        return HttpResponse(t.render(c, request))
 current_mps = CurrentMPView.as_view()
 
 
@@ -68,19 +92,19 @@ class FormerMPView(ModelListView):
         former_members = ElectedMember.objects.exclude(end_date__isnull=True)\
             .order_by('riding__province', 'politician__name_family', '-start_date')\
             .select_related('politician', 'riding', 'party')
-        seen = set()
+        seen = set(Politician.objects.current().values_list('id', flat=True))
         object_list = []
         for member in former_members:
             if member.politician_id not in seen:
                 object_list.append(member)
                 seen.add(member.politician_id)
 
-        c = RequestContext(request, {
+        c = {
             'object_list': object_list,
             'title': 'Former MPs (since 1994)'
-        })
+        }
         t = loader.get_template("politicians/former_electedmember_list.html")
-        return HttpResponse(t.render(c))
+        return HttpResponse(t.render(c, request))
 former_mps = FormerMPView.as_view()
 
 
@@ -131,7 +155,7 @@ class PoliticianView(ModelDetailView):
         else:
             statement_page = None
 
-        c = RequestContext(request, {
+        c = {
             'pol': pol,
             'member': pol.latest_member,
             'candidacies': pol.candidacy_set.all().order_by('-election__date'),
@@ -143,12 +167,12 @@ class PoliticianView(ModelDetailView):
             'search_placeholder': u"Search %s in Parliament" % pol.name,
             'wordcloud_js': TextAnalysis.objects.get_wordcloud_js(
                 key=pol.get_absolute_url() + 'text-analysis/')
-        })
+        }
         if request.is_ajax():
             t = loader.get_template("hansards/statement_page_politician_view.inc")
         else:
             t = loader.get_template("politicians/politician.html")
-        return HttpResponse(t.render(c))
+        return HttpResponse(t.render(c, request))
 politician = vary_on_headers('X-Requested-With')(PoliticianView.as_view())
 
 
@@ -161,13 +185,13 @@ def contact(request, pol_id=None, pol_slug=None):
     if not pol.current_member:
         raise Http404
 
-    c = RequestContext(request, {
+    c = {
         'pol': pol,
         'info': pol.info(),
         'title': u'Contact %s' % pol.name
-    })
+    }
     t = loader.get_template("politicians/contact.html")
-    return HttpResponse(t.render(c))
+    return HttpResponse(t.render(c, request))
 
 
 def hide_activity(request):
@@ -204,7 +228,7 @@ class PoliticianMembershipView(ModelDetailView):
     resource_name = 'Politician membership'
 
     def get_object(self, request, member_id):
-        return ElectedMember.objects.select_related(depth=1).get(id=member_id)
+        return ElectedMember.objects.select_related('party', 'riding', 'politician').get(id=member_id)
 
 
 class PoliticianMembershipListView(ModelListView):
@@ -212,7 +236,7 @@ class PoliticianMembershipListView(ModelListView):
     resource_name = 'Politician memberships'
 
     def get_qs(self, request):
-        return ElectedMember.objects.all().select_related(depth=1)
+        return ElectedMember.objects.all().select_related('party', 'riding', 'politician')
 
 
 class PoliticianStatementFeed(Feed):

@@ -77,12 +77,15 @@ class Bill(models.Model):
         u'SenateAt1stReading': 'First reading (Senate)',
         u'HouseAt1stReading': 'First reading (House)',
         u'HouseAt2ndReading': 'Second reading (House)',
+        u'HouseAtReportStageAndSecondReading': 'Report stage and second reading (House)',
         u'SenateAt2ndReading': 'Second reading (Senate)',
         u'SenateAt3rdReading': 'Third reading (Senate)',
         u'HouseAt3rdReading': 'Third reading (House)',
         u'HouseInCommittee': 'In committee (House)',
         u'SenateInCommittee': 'In committee (Senate)',
         u'SenateConsiderationOfCommitteeReport': 'Considering committee report (Senate)',
+        u'HouseConsiderationOfCommitteeReport': 'Considering committee report (House)',
+        u'SenateConsiderationOfAmendments': 'Considering amendments (Senate)',
         u'HouseConsiderationOfAmendments': 'Considering amendments (House)',
         u'Introduced': 'Introduced'
     }
@@ -123,7 +126,7 @@ class Bill(models.Model):
         return self.url_for_session(self.session)
 
     def url_for_session(self, session):
-        return urlresolvers.reverse('parliament.bills.views.bill', kwargs={
+        return urlresolvers.reverse('bill', kwargs={
             'session_id': session.id, 'bill_number': self.number})
         
     def get_legisinfo_url(self, lang='E'):
@@ -456,7 +459,7 @@ class VoteQuestion(models.Model):
             
     @models.permalink
     def get_absolute_url(self):
-        return ('parliament.bills.views.vote', [],
+        return ('vote', [],
             {'session_id': self.session_id, 'number': self.number})
 
 VOTE_CHOICES = [

@@ -1,25 +1,30 @@
 # Required Python libraries for openparliament
 # pip can install these libraries automatically by reading this file:
 # pip install -r requirements.txt
-BeautifulSoup>=3.2.0
-Django>=1.6,<1.7
-Markdown==2.3.1
-PIL>=1.1.6
-South==0.7.2
-django-extensions==1.2.5
-django-haystack==1.0.1-final
+BeautifulSoup==3.2.0
+Django>=1.11.0,<2.0
+Markdown==2.6.8
+Pillow==4.0.0
+django-extensions==1.7.6
+#django-haystack==2.6.0
+# Using this fork of Haystack because it includes a pull request
+# (unmerged upstream as of 2017-02) fixing a bug with index fields across
+# foreignkey__relationships
+-e git+git://github.com/wylee/django-haystack.git@88b6d31#egg=django-haystack
 #psycopg2>=2.0.7
-pysolr==2.0.9
-sorl-thumbnail==3.2.5
+pysolr==3.6.0
 wsgiref==0.1.2
 feedparser==4.1
-twitter==1.9.0
-httplib2
-django-compressor==1.3
-freebase
-lxml
-#recaptcha-client==1.0.5
+django-compressor==2.1.1
+django-libsass==0.7
+requests==2.13.0
+requests-oauthlib==0.6.1
+lxml==3.7.3
+cssselect==0.9.1
 -e git+git://github.com/rhymeswithcycle/alpheus.git#egg=alpheus
-PyBrowserID
+google-api-python-client==1.5.0
 # WebOb is used for Accept header parsing
 webob==1.2.2
+jsonfield==1.0.3
+python-memcached==1.58
+django-imagekit==4.0

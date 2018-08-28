@@ -8,7 +8,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.signing import Signer
 from django.core import urlresolvers
 from django.db import models
-from django.template import loader, Context
+from django.template import loader
 
 from parliament.core.models import Politician
 from parliament.core.templatetags.ours import english_list
@@ -179,23 +179,26 @@ class Subscription(models.Model):
         if self.topic.politician_hansard_alert:
             ctx['person_name'] = documents[0]['politician']
             t = loader.get_template('alerts/mp_hansard_alert.txt')
-            text = t.render(Context(ctx))
+            text = t.render(ctx)
             return dict(text=text)
 
         ctx.update(
             topic=self.topic
         )
         t = loader.get_template('alerts/search_alert.txt')
-        text = t.render(Context(ctx))
+        text = t.render(ctx)
         return dict(text=text)
 
     def get_subject_line(self, documents):
         if self.topic.politician_hansard_alert:
-            topics = set((d['topic'] for d in documents))
-            subj = u'%(politician)s spoke about %(topics)s in the House' % {
-                'politician': documents[0]['politician'],
-                'topics': english_list(list(topics))
-            }
+            topics = set((d['topic'] for d in documents if 'topic' in d))
+            if topics:
+                subj = u'%(politician)s spoke about %(topics)s in the House' % {
+                    'politician': documents[0]['politician'],
+                    'topics': english_list(list(topics))
+                }
+            else:
+                subj = documents[0]['politician'] + u' spoke in the House'
         else:
             subj = u'New from openparliament.ca for %s' % self.topic.query
         return subj[:200]
@@ -206,10 +209,11 @@ class Subscription(models.Model):
             self.get_subject_line(documents),
             rendered['text'],
             'alerts@contact.openparliament.ca',
-            [self.user.email]
+            [self.user.email],
+            headers={'List-Unsubscribe': '<' + self.get_unsubscribe_url(full=True) + '>'}
         )
-        if not self.topic.politician_hansard_alert:
-            msg.bcc = ['michael@openparliament.ca']
+        if getattr(settings, 'PARLIAMENT_ALERTS_BCC', ''):
+            msg.bcc = [settings.PARLIAMENT_ALERTS_BCC]
         if rendered.get('html'):
             msg.attach_alternative(rendered['html'], 'text/html')
         if getattr(settings, 'PARLIAMENT_SEND_EMAIL', False):
@@ -238,10 +242,6 @@ class PoliticianAlert(models.Model):
         h.update(self.email)
         h.update(settings.SECRET_KEY)
         return base64.urlsafe_b64encode(h.digest()).replace('=', '')
-        
-    @models.permalink
-    def get_unsubscribe_url(self):
-        return ('parliament.alerts.views.unsubscribe_old', [], {'alert_id': self.id, 'key': self.get_key()})
     
     def __unicode__(self):
         return u"%s for %s (%s)" % \

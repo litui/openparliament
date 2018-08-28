@@ -1,3 +1,4 @@
+import datetime
 import time
 
 from django.db import transaction, models
@@ -16,7 +17,7 @@ from parliament.text_analysis import corpora
 import logging
 logger = logging.getLogger(__name__)
 
-@transaction.commit_on_success
+@transaction.atomic
 def twitter():
     twit.save_tweets()
     return True
@@ -34,7 +35,7 @@ def votes():
 def bills():
     legisinfo.import_bills(Session.objects.current())
 
-@transaction.commit_on_success
+@transaction.atomic
 def prune_activities():
     for pol in Politician.objects.current():
         activityutils.prune(Activity.public.filter(politician=pol))
@@ -44,14 +45,20 @@ def committee_evidence():
     for document in Document.evidence\
       .annotate(scount=models.Count('statement'))\
       .exclude(scount__gt=0).exclude(skip_parsing=True).order_by('date').iterator():
-        print document
-        parl_document.import_document(document, interactive=False)
-        if document.statement_set.all().count():
-            document.save_activity()
+        try:
+            print document
+            parl_document.import_document(document, interactive=False)
+            if document.statement_set.all().count():
+                document.save_activity()
+        except Exception, e:
+            logger.exception("Evidence parse failure on #%s: %r" % (document.id, e))
+            continue
     
 def committees(sess=None):
     if sess is None:
         sess = Session.objects.current()
+        if sess.start >= datetime.date.today():
+            return
     parl_cmte.import_committee_list(session=sess)
     parl_cmte.import_committee_documents(sess)
 
@@ -59,34 +66,24 @@ def committees_full():
     committees()
     committee_evidence()
     
-@transaction.commit_on_success
+@transaction.atomic
 def hansards_load():
     parl_document.fetch_latest_debates()
-    return True
         
-@transaction.commit_manually
 def hansards_parse():
     for hansard in Document.objects.filter(document_type=Document.DEBATE)\
       .annotate(scount=models.Count('statement'))\
       .exclude(scount__gt=0).exclude(skip_parsing=True).order_by('date').iterator():
-        try:
-            parl_document.import_document(hansard, interactive=False)
-        except Exception, e:
-            transaction.rollback()
-            logger.error("Hansard parse failure on #%s: %r" % (hansard.id, e))
-            continue
-        else:
-            transaction.commit()
-        # now reload the Hansard to get the date
-        hansard = Document.objects.get(pk=hansard.id)
-        try:
+        with transaction.atomic():
+            try:
+                with transaction.atomic():
+                    parl_document.import_document(hansard, interactive=False)
+            except Exception, e:
+                logger.exception("Hansard parse failure on #%s: %r" % (hansard.id, e))
+                continue
+            # now reload the Hansard to get the date
+            hansard = Document.objects.get(pk=hansard.id)
             hansard.save_activity()
-        except Exception, e:
-            transaction.rollback()
-            raise e
-        else:
-            transaction.commit()
-    transaction.commit()
             
 def hansards():
     hansards_load()
@@ -96,4 +93,4 @@ def corpus_for_debates():
     corpora.generate_for_debates()
 
 def corpus_for_committees():
-    corpora.generate_for_committees()    
+    corpora.generate_for_committees()

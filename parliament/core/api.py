@@ -202,7 +202,10 @@ class APIFilters(object):
         """
         def inner(qs, view, filter_name, filter_extra, val):
             url_bits = val.rstrip('/').split('/')
-            return qs.filter(**(query_func(url_bits)))
+            try:
+                return qs.filter(**(query_func(url_bits)))
+            except ValueError as e:
+                raise BadRequest(e)
         inner.help = help
         return inner
 
@@ -237,7 +240,6 @@ class APIFilters(object):
             return qs
         inner.help = help
         return inner
-
 
 
 class ModelListView(APIView):
@@ -311,8 +313,8 @@ class ModelDetailView(APIView):
 
 
 def no_robots(request):
-    if request.get_host().lower().startswith(settings.PARLIAMENT_API_HOST):
-        return HttpResponse('User-agent: *\nDisallow: /\n', content_type='text/plain')
+    if request.get_host().lower().startswith(settings.PARLIAMENT_API_HOST) or getattr(settings, 'PARLIAMENT_NO_ROBOTS', False):
+        return HttpResponse('User-agent: googlecivicsapi\nDisallow:\n\nUser-agent: *\nDisallow: /\n', content_type='text/plain')
     return HttpResponse('', content_type='text/plain')
 
 def docs(request):

@@ -29,7 +29,7 @@ def _get_previous_session(session):
     except IndexError:
         return None
 
-@transaction.commit_on_success
+@transaction.atomic
 def import_bills(session):
     """Import bill data from LegisInfo for the given session.
     
@@ -193,13 +193,20 @@ def _import_bill(lbill, session, previous_session=None):
         if BillEvent.objects.filter(source_id=source_id).exists():
             continue
 
+        try:
+            status_en = levent.xpath('Status/Title[@language="en"]/text()')[0]
+            status_fr = levent.xpath('Status/Title[@language="fr"]/text()')[0]
+        except IndexError:
+            logger.debug("No status present in billevent: %s", etree.tostring(levent))
+            continue
+
         event = BillEvent(
             source_id=source_id,
             bis=bis,
             date=_parse_date(levent.get('date')),
             institution='S' if levent.get('chamber') == 'SEN' else 'C',
-            status_en=levent.xpath('Status/Title[@language="en"]/text()')[0],
-            status_fr=levent.xpath('Status/Title[@language="fr"]/text()')[0]
+            status_en=status_en,
+            status_fr=status_fr
         )
 
         if event.institution == 'C':

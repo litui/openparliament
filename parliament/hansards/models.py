@@ -1,15 +1,15 @@
 #coding: utf-8
 
-import gzip, os, re
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import datetime
+import gzip
+import os
+import re
 
 from django.db import models
 from django.conf import settings
 from django.core import urlresolvers
-from django.core.files.base import ContentFile
 from django.template.defaultfilters import slugify
-from django.utils.datastructures import SortedDict
 from django.utils.html import strip_tags
 from django.utils.safestring import mark_safe
 
@@ -23,19 +23,19 @@ logger = logging.getLogger(__name__)
 
 class DebateManager(models.Manager):
 
-    def get_query_set(self):
-        return super(DebateManager, self).get_query_set().filter(document_type=Document.DEBATE)
+    def get_queryset(self):
+        return super(DebateManager, self).get_queryset().filter(document_type=Document.DEBATE)
 
 class EvidenceManager(models.Manager):
 
-    def get_query_set(self):
-        return super(EvidenceManager, self).get_query_set().filter(document_type=Document.EVIDENCE)
+    def get_queryset(self):
+        return super(EvidenceManager, self).get_queryset().filter(document_type=Document.EVIDENCE)
 
 class NoStatementManager(models.Manager):
     """Manager restricts to Documents that haven't had statements parsed."""
 
-    def get_query_set(self):
-        return super(NoStatementManager, self).get_query_set()\
+    def get_queryset(self):
+        return super(NoStatementManager, self).get_queryset()\
             .annotate(scount=models.Count('statement'))\
             .exclude(scount__gt=0)
 
@@ -163,7 +163,7 @@ class Document(models.Model):
             description: Short title or affiliation
         """
         ids_seen = set()
-        speakers = SortedDict()
+        speakers = OrderedDict()
         for st in self.statement_set.filter(who_hocid__isnull=False).values_list(
                 'who_' + settings.LANGUAGE_CODE,            # 0
                 'who_context_' + settings.LANGUAGE_CODE,    # 1
@@ -190,13 +190,13 @@ class Document(models.Model):
 
     def outside_speaker_summary(self):
         """Same as speaker_summary, but only non-MPs."""
-        return SortedDict(
+        return OrderedDict(
             [(k, v) for k, v in self.speaker_summary().items() if not v['politician']]
         )
 
     def mp_speaker_summary(self):
         """Same as speaker_summary, but only MPs."""
-        return SortedDict(
+        return OrderedDict(
             [(k, v) for k, v in self.speaker_summary().items() if v['politician']]
         )
     
@@ -266,21 +266,12 @@ class Document(models.Model):
         self.downloaded = False
         self.save()
 
-    def _fetch_xml(self, language):
-        import urllib2
-        return urllib2.urlopen('http://www.parl.gc.ca/HousePublications/Publication.aspx?DocId=%s&Language=%s&Mode=1&xml=true'
-        % (self.source_id, language[0].upper())).read()
-
-    def download(self):
-        if self.downloaded:
-            return True
-        if self.date and self.date.year < 2006:
-            raise Exception("No XML available before 2006")
-        langs = ('en', 'fr')
-        paths = [self.get_filepath(l) for l in langs]
-        if not all((os.path.exists(p) for p in paths)):
-            for path, lang in zip(paths, langs):
-                self._save_file(path, self._fetch_xml(lang))
+    def save_xml(self, xml_en, xml_fr, overwrite=False):
+        if not overwrite and any(
+                os.path.exists(p) for p in [self.get_filepath(l) for l in ['en', 'fr']]):
+            raise Exception("XML files already exist")
+        self._save_file(self.get_filepath('en'), xml_en)
+        self._save_file(self.get_filepath('fr'), xml_fr)
         self.downloaded = True
         self.save()
 
@@ -307,11 +298,12 @@ class Statement(models.Model):
     who_context_en = models.CharField(max_length=300, blank=True)
     who_context_fr = models.CharField(max_length=500, blank=True)
 
-
     content_en = models.TextField()
     content_fr = models.TextField(blank=True)
     sequence = models.IntegerField(db_index=True)
     wordcount = models.IntegerField()
+    wordcount_en = models.PositiveSmallIntegerField(null=True,
+        help_text="# words originally spoken in English")
 
     procedural = models.BooleanField(default=False, db_index=True)
     written_question = models.CharField(max_length=1, blank=True, choices=(
@@ -336,10 +328,10 @@ class Statement(models.Model):
     who_context = language_property('who_context')
 
     def save(self, *args, **kwargs):
-        if not self.wordcount:
-            self.wordcount = parsetools.countWords(self.text_plain())
         self.content_en = self.content_en.replace('\n', '').replace('</p>', '</p>\n').strip()
         self.content_fr = self.content_fr.replace('\n', '').replace('</p>', '</p>\n').strip()
+        if self.wordcount_en is None:
+            self._generate_wordcounts()
         if ((not self.procedural) and self.wordcount <= 300
             and ( 
                 (parsetools.r_notamember.search(self.who) and re.search(r'(Speaker|Chair|président)', self.who))
@@ -369,8 +361,6 @@ class Statement(models.Model):
     def __unicode__ (self):
         return u"%s speaking about %s around %s" % (self.who, self.topic, self.time)
 
-    @property
-    @memoize_property
     def content_floor(self):
         if not self.content_fr:
             return self.content_en
@@ -387,16 +377,62 @@ class Statement(models.Model):
                 r.append(e)
         return u"\n".join(r)
 
+    def content_floor_if_necessary(self):
+        """Returns text spoken in the original language(s), but only if that would
+        be different than the content in the default language."""
+        if not (self.content_en and self.content_fr):
+            return ''
+
+        lang_matches = re.finditer(r'data-originallang="(\w\w)"',
+            getattr(self, 'content_' + settings.LANGUAGE_CODE))
+        if any(m.group(1) != settings.LANGUAGE_CODE for m in lang_matches):
+            return self.content_floor()
+
+        return ''
+
     def text_html(self, language=settings.LANGUAGE_CODE):
         return mark_safe(getattr(self, 'content_' + language))
 
     def text_plain(self, language=settings.LANGUAGE_CODE):
+        return self.html_to_text(getattr(self, 'content_' + language))
+
+    @staticmethod
+    def html_to_text(text):
         return strip_tags(
-            getattr(self, 'content_' + language)
+            text
             .replace('\n', '')
             .replace('<br>', '\n')
             .replace('</p>', '\n\n')
         ).strip()
+
+    def _generate_wordcounts(self):
+        paragraphs = [
+            [], # english
+            [], # french
+            [] # procedural
+        ]
+
+        for para in self.content_en.split('\n'):
+            idx = para.find('data-originallang="')
+            if idx == -1:
+                paragraphs[2].append(para)
+            else:
+                lang = para[idx+19:idx+21]
+                if lang == 'en':
+                    paragraphs[0].append(para)
+                elif lang == 'fr':
+                    paragraphs[1].append(para)
+                else:
+                    raise Exception("What kind of language is %s?" % lang)
+
+        counts = [
+            len(self.html_to_text(' '.join(p)).split())
+            for p in paragraphs
+        ]
+
+        self.wordcount = counts[0] + counts[1]
+        self.wordcount_en = counts[0]
+        #self.wordcount_procedural = counts[2]
 
     # temp compatibility
     @property

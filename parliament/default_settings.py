@@ -10,9 +10,6 @@ MANAGERS = ADMINS
 
 PROJ_ROOT = os.path.dirname(os.path.realpath(__file__))
 
-HAYSTACK_SEARCH_ENGINE = 'solr'
-HAYSTACK_SITECONF = 'parliament.search_sites'
-
 CACHE_MIDDLEWARE_KEY_PREFIX = 'parl'
 CACHE_MIDDLEWARE_ANONYMOUS_ONLY = True
 
@@ -32,6 +29,8 @@ SITE_ID = 1
 # If you set this to False, Django will make some optimizations so as not
 # to load the internationalization machinery.
 USE_I18N = True
+
+LOCALE_PATHS = [os.path.join(PROJ_ROOT, 'locale')]
 
 # If you set this to False, Django will not format dates, numbers and
 # calendars according to the current locale
@@ -57,26 +56,51 @@ STATICFILES_FINDERS = [
 ]
 
 COMPRESS_CSS_FILTERS = [
+    'parliament.core.utils.AutoprefixerFilter',
     'compressor.filters.css_default.CssAbsoluteFilter',
-    'compressor.filters.cssmin.CSSMinFilter'
+    'compressor.filters.cssmin.rCSSMinFilter'
 ]
 COMPRESS_JS_FILTERS = []
 COMPRESS_OFFLINE = True
+COMPRESS_ENABLED = False
+COMPRESS_PRECOMPILERS = (
+    ('text/x-scss', 'django_libsass.SassCompiler'),
+    ('es6', 'cat {infile} | ./node_modules/.bin/babel --presets es2015 > {outfile}'),
+)
+COMPRESS_CACHEABLE_PRECOMPILERS = ['es6']
 
 PARLIAMENT_LANGUAGE_MODEL_PATH = os.path.realpath(os.path.join(PROJ_ROOT, '..', '..', 'language_models'))
-PARLIAMENT_DISABLE_WORDCLOUD = True
+PARLIAMENT_GENERATE_TEXT_ANALYSIS = False
 
 APPEND_SLASH = False
 
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_AGE = 60*60*24*60  # 60 days
+SESSION_COOKIE_SECURE = True
 
 PARLIAMENT_API_HOST = 'api.openparliament.ca'
 
-TEMPLATE_LOADERS = (
-    'django.template.loaders.filesystem.Loader',
-    'django.template.loaders.app_directories.Loader',
-)
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'APP_DIRS': True,
+        'DIRS': [os.path.join(PROJ_ROOT, 'templates')],
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+                'django.template.context_processors.i18n',
+                'django.template.context_processors.media',
+                'django.template.context_processors.static',
+                'parliament.accounts.context_processors.auth',
+                'parliament.core.utils.lang_context',
+            ],
+        },
+    },
+]
+
 
 MIDDLEWARE_CLASSES = [
     'django.middleware.cache.UpdateCacheMiddleware',
@@ -95,10 +119,6 @@ ROOT_URLCONF = 'parliament.urls'
 
 WSGI_APPLICATION = 'parliament.wsgi.application'
 
-TEMPLATE_DIRS = [
-    os.path.join(PROJ_ROOT, 'templates'),
-]
-
 INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -112,8 +132,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django_extensions',
     'haystack',
-    'south',
-    'sorl.thumbnail',
+    'imagekit',
     'compressor',
     'parliament.core',
     'parliament.accounts',
@@ -128,29 +147,6 @@ INSTALLED_APPS = [
     'parliament.text_analysis',
 ]
 
-THUMBNAIL_SUBDIR = '_thumbs'
-THUMBNAIL_PROCESSORS = (
-    'sorl.thumbnail.processors.colorspace',
-    'sorl.thumbnail.processors.autocrop',
-    'parliament.core.thumbnail.crop_first',
-    'sorl.thumbnail.processors.scale_and_crop',
-    'sorl.thumbnail.processors.filters',
-)
-
-SOUTH_TESTS_MIGRATE = False
-TEST_RUNNER = 'parliament.core.test_utils.TestSuiteRunner'
-TEST_APP_PREFIX = 'parliament'
-
-TEMPLATE_CONTEXT_PROCESSORS = (
-    "django.contrib.auth.context_processors.auth",
-    "django.core.context_processors.debug",
-    "django.core.context_processors.i18n",
-    "django.core.context_processors.media",
-    "django.core.context_processors.static",
-    "django.contrib.messages.context_processors.messages",
-    "django.core.context_processors.request",
-)
-
 LOGGING = {
     'version': 1,
     'formatters': {
@@ -163,12 +159,12 @@ LOGGING = {
     },
     'handlers': {
         'null': {
-            'level':'DEBUG',
-            'class':'django.utils.log.NullHandler',
+            'level': 'DEBUG',
+            'class': 'logging.NullHandler',
         },
-        'console':{
-            'level':'DEBUG',
-            'class':'logging.StreamHandler',
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
             'formatter': 'simple'
         },
         'mail_admins': {
@@ -178,9 +174,9 @@ LOGGING = {
     },
     'loggers': {
         'django': {
-            'handlers':['null'],
+            'handlers': ['null'],
             'propagate': True,
-            'level':'INFO',
+            'level': 'INFO',
         },
         'django.request': {
             'handlers': ['mail_admins'],
@@ -189,7 +185,7 @@ LOGGING = {
         },
         'parliament': {
             'handlers': ['console'],
-            'level': 'INFO',
+            'level': 'WARNING',
         }
     },
 }

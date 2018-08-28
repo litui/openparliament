@@ -1,132 +1,89 @@
-# encoding: utf-8
-import datetime
-from south.db import db
-from south.v2 import SchemaMigration
-from django.db import models
+# -*- coding: utf-8 -*-
+from __future__ import unicode_literals
 
-class Migration(SchemaMigration):
-    
-    def forwards(self, orm):
-        
-        # Adding model 'Hansard'
-        db.create_table('hansards_hansard', (
-            ('sequence', self.gf('django.db.models.fields.IntegerField')(null=True, blank=True)),
-            ('url', self.gf('django.db.models.fields.URLField')(max_length=200)),
-            ('number', self.gf('django.db.models.fields.CharField')(max_length=6, blank=True)),
-            ('session', self.gf('django.db.models.fields.related.ForeignKey')(to=orm['core.Session'])),
-            ('date', self.gf('django.db.models.fields.DateField')(null=True, blank=True)),
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-        ))
-        db.send_create_signal('hansards', ['Hansard'])
+from django.db import migrations, models
 
-        # Adding model 'HansardCache'
-        db.create_table('hansards_hansardcache', (
-            ('hansard', self.gf('django.db.models.fields.related.ForeignKey')(to=orm['hansards.Hansard'])),
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-            ('filename', self.gf('django.db.models.fields.CharField')(max_length=100)),
-        ))
-        db.send_create_signal('hansards', ['HansardCache'])
 
-        # Adding model 'Statement'
-        db.create_table('hansards_statement', (
-            ('member', self.gf('django.db.models.fields.related.ForeignKey')(to=orm['core.ElectedMember'], null=True, blank=True)),
-            ('hansard', self.gf('django.db.models.fields.related.ForeignKey')(to=orm['hansards.Hansard'])),
-            ('sequence', self.gf('django.db.models.fields.IntegerField')()),
-            ('text', self.gf('django.db.models.fields.TextField')()),
-            ('who', self.gf('django.db.models.fields.CharField')(max_length=300)),
-            ('wordcount', self.gf('django.db.models.fields.IntegerField')()),
-            ('heading', self.gf('django.db.models.fields.CharField')(max_length=110, blank=True)),
-            ('topic', self.gf('django.db.models.fields.CharField')(max_length=200, blank=True)),
-            ('time', self.gf('django.db.models.fields.DateTimeField')(null=True, blank=True)),
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-        ))
-        db.send_create_signal('hansards', ['Statement'])
-    
-    
-    def backwards(self, orm):
-        
-        # Deleting model 'Hansard'
-        db.delete_table('hansards_hansard')
+class Migration(migrations.Migration):
 
-        # Deleting model 'HansardCache'
-        db.delete_table('hansards_hansardcache')
+    dependencies = [
+        ('bills', '0001_initial'),
+        ('core', '0001_initial'),
+    ]
 
-        # Deleting model 'Statement'
-        db.delete_table('hansards_statement')
-    
-    
-    models = {
-        'core.electedmember': {
-            'Meta': {'object_name': 'ElectedMember'},
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'party': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['core.Party']"}),
-            'politician': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['core.Politician']"}),
-            'riding': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['core.Riding']"}),
-            'session': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['core.Session']"})
-        },
-        'core.party': {
-            'Meta': {'object_name': 'Party'},
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'name': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
-            'slug': ('django.db.models.fields.CharField', [], {'max_length': '10', 'blank': 'True'})
-        },
-        'core.politician': {
-            'Meta': {'object_name': 'Politician'},
-            'dob': ('django.db.models.fields.DateField', [], {'null': 'True', 'blank': 'True'}),
-            'gender': ('django.db.models.fields.CharField', [], {'max_length': '1', 'blank': 'True'}),
-            'headshot': ('django.db.models.fields.files.ImageField', [], {'max_length': '100', 'null': 'True', 'blank': 'True'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'name': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
-            'name_family': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
-            'name_given': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
-            'parlpage': ('django.db.models.fields.URLField', [], {'max_length': '200', 'blank': 'True'}),
-            'site': ('django.db.models.fields.URLField', [], {'max_length': '200', 'blank': 'True'})
-        },
-        'core.riding': {
-            'Meta': {'object_name': 'Riding'},
-            'edid': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'name': ('django.db.models.fields.CharField', [], {'max_length': '60'}),
-            'province': ('django.db.models.fields.CharField', [], {'max_length': '2'}),
-            'slug': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '60'})
-        },
-        'core.session': {
-            'Meta': {'object_name': 'Session'},
-            'end': ('django.db.models.fields.DateField', [], {'null': 'True', 'blank': 'True'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'name': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
-            'parliamentnum': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
-            'sessnum': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
-            'start': ('django.db.models.fields.DateField', [], {})
-        },
-        'hansards.hansard': {
-            'Meta': {'object_name': 'Hansard'},
-            'date': ('django.db.models.fields.DateField', [], {'null': 'True', 'blank': 'True'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'number': ('django.db.models.fields.CharField', [], {'max_length': '6', 'blank': 'True'}),
-            'sequence': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
-            'session': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['core.Session']"}),
-            'url': ('django.db.models.fields.URLField', [], {'max_length': '200'})
-        },
-        'hansards.hansardcache': {
-            'Meta': {'object_name': 'HansardCache'},
-            'filename': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
-            'hansard': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['hansards.Hansard']"}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
-        },
-        'hansards.statement': {
-            'Meta': {'object_name': 'Statement'},
-            'hansard': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['hansards.Hansard']"}),
-            'heading': ('django.db.models.fields.CharField', [], {'max_length': '110', 'blank': 'True'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'member': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['core.ElectedMember']", 'null': 'True', 'blank': 'True'}),
-            'sequence': ('django.db.models.fields.IntegerField', [], {}),
-            'text': ('django.db.models.fields.TextField', [], {}),
-            'time': ('django.db.models.fields.DateTimeField', [], {'null': 'True', 'blank': 'True'}),
-            'topic': ('django.db.models.fields.CharField', [], {'max_length': '200', 'blank': 'True'}),
-            'who': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
-            'wordcount': ('django.db.models.fields.IntegerField', [], {})
-        }
-    }
-    
-    complete_apps = ['hansards']
+    operations = [
+        migrations.CreateModel(
+            name='Document',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('document_type', models.CharField(db_index=True, max_length=1, choices=[(b'D', b'Debate'), (b'E', b'Committee Evidence')])),
+                ('date', models.DateField(null=True, blank=True)),
+                ('number', models.CharField(max_length=6, blank=True)),
+                ('source_id', models.IntegerField(unique=True, db_index=True)),
+                ('most_frequent_word', models.CharField(max_length=20, blank=True)),
+                ('wordcloud', models.ImageField(null=True, upload_to=b'autoimg/wordcloud', blank=True)),
+                ('downloaded', models.BooleanField(default=False, help_text=b'Has the source data been downloaded?')),
+                ('skip_parsing', models.BooleanField(default=False, help_text=b"Don't try to parse this, presumably because of errors in the source.")),
+                ('public', models.BooleanField(default=False, verbose_name=b'Display on site?')),
+                ('multilingual', models.BooleanField(default=False, verbose_name=b'Content parsed in both languages?')),
+                ('session', models.ForeignKey(to='core.Session')),
+            ],
+            options={
+                'ordering': ('-date',),
+            },
+        ),
+        migrations.CreateModel(
+            name='OldSequenceMapping',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('sequence', models.PositiveIntegerField()),
+                ('slug', models.SlugField(max_length=100)),
+                ('document', models.ForeignKey(to='hansards.Document')),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Statement',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('time', models.DateTimeField(db_index=True)),
+                ('source_id', models.CharField(max_length=15, blank=True)),
+                ('slug', models.SlugField(max_length=100, blank=True)),
+                ('urlcache', models.CharField(max_length=200, blank=True)),
+                ('h1_en', models.CharField(max_length=300, blank=True)),
+                ('h2_en', models.CharField(max_length=300, blank=True)),
+                ('h3_en', models.CharField(max_length=300, blank=True)),
+                ('h1_fr', models.CharField(max_length=400, blank=True)),
+                ('h2_fr', models.CharField(max_length=400, blank=True)),
+                ('h3_fr', models.CharField(max_length=400, blank=True)),
+                ('who_en', models.CharField(max_length=300, blank=True)),
+                ('who_fr', models.CharField(max_length=500, blank=True)),
+                ('who_hocid', models.PositiveIntegerField(db_index=True, null=True, blank=True)),
+                ('who_context_en', models.CharField(max_length=300, blank=True)),
+                ('who_context_fr', models.CharField(max_length=500, blank=True)),
+                ('content_en', models.TextField()),
+                ('content_fr', models.TextField(blank=True)),
+                ('sequence', models.IntegerField(db_index=True)),
+                ('wordcount', models.IntegerField()),
+                ('wordcount_en', models.PositiveSmallIntegerField(help_text=b'# words originally spoken in English', null=True)),
+                ('procedural', models.BooleanField(default=False, db_index=True)),
+                ('written_question', models.CharField(blank=True, max_length=1, choices=[(b'Q', b'Question'), (b'R', b'Response')])),
+                ('statement_type', models.CharField(max_length=35, blank=True)),
+                ('bills', models.ManyToManyField(to='bills.Bill', blank=True)),
+                ('document', models.ForeignKey(to='hansards.Document')),
+                ('member', models.ForeignKey(blank=True, to='core.ElectedMember', null=True)),
+                ('mentioned_politicians', models.ManyToManyField(related_name='statements_with_mentions', to='core.Politician', blank=True)),
+                ('politician', models.ForeignKey(blank=True, to='core.Politician', null=True)),
+            ],
+            options={
+                'ordering': ('sequence',),
+            },
+        ),
+        migrations.AlterUniqueTogether(
+            name='statement',
+            unique_together=set([('document', 'slug')]),
+        ),
+        migrations.AlterUniqueTogether(
+            name='oldsequencemapping',
+            unique_together=set([('document', 'sequence')]),
+        ),
+    ]

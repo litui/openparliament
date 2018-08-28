@@ -9,7 +9,7 @@ from parliament.core.models import Session
 from parliament.core.parsetools import slugify
 from parliament.core.templatetags.ours import english_list
 from parliament.core.utils import memoize_property, language_property
-from parliament.hansards.models import Document, url_from_docid
+from parliament.hansards.models import Document
 
 class CommitteeManager(models.Manager):
 
@@ -29,6 +29,7 @@ class Committee(models.Model):
     parent = models.ForeignKey('self', related_name='subcommittees',
         blank=True, null=True)
     sessions = models.ManyToManyField(Session, through='CommitteeInSession')
+    joint = models.BooleanField('Joint committee?', default=False)
 
     display = models.BooleanField('Display on site?', db_index=True, default=True)
 
@@ -59,8 +60,7 @@ class Committee(models.Model):
     
     @models.permalink
     def get_absolute_url(self):
-        return ('parliament.committees.views.committee', [],
-            {'slug': self.slug})
+        return ('committee', [], {'slug': self.slug})
 
     def get_source_url(self):
         return self.committeeinsession_set.order_by('-session__start')[0].get_source_url()
@@ -111,9 +111,9 @@ class CommitteeInSession(models.Model):
         return u"%s (%s) in %s" % (self.committee, self.acronym, self.session_id)
 
     def get_source_url(self):
-        return 'http://parl.gc.ca/CommitteeBusiness/CommitteeHome.aspx?Cmte=%(acronym)s&Language=%(lang)s&Mode=1&Parl=%(parliamentnum)s&Ses=%(sessnum)s' % {
+        return 'http://www.parl.gc.ca/Committees/%(lang)s/%(acronym)s?parl=%(parliamentnum)d&session=%(sessnum)d' % {
             'acronym': self.acronym,
-            'lang': settings.LANGUAGE_CODE.upper()[0],
+            'lang': settings.LANGUAGE_CODE[:2],
             'parliamentnum': self.session.parliamentnum,
             'sessnum': self.session.sessnum
         }
@@ -154,10 +154,10 @@ class CommitteeActivityInSession(models.Model):
     source_id = models.IntegerField(unique=True)
 
     def get_source_url(self):
-        return 'http://www.parl.gc.ca/CommitteeBusiness/StudyActivityHome.aspx?Stac=%(source_id)d&Parl=%(parliamentnum)d&Ses=%(sessnum)d' % {
+        return 'http://www.parl.gc.ca/Committees/%(lang)s/%(acronym)s/StudyActivity?studyActivityId=%(source_id)s' % {
             'source_id': self.source_id,
-            'parliamentnum': self.session.parliamentnum,
-            'sessnum': self.session.sessnum
+            'acronym': self.activity.committee.get_acronym(self.session),
+            'lang': settings.LANGUAGE_CODE[:2]
         }
 
     class Meta:
@@ -170,6 +170,7 @@ class CommitteeMeeting(models.Model):
     date = models.DateField(db_index=True)
     start_time = models.TimeField()
     end_time = models.TimeField(blank=True, null=True)
+    source_id = models.IntegerField(blank=True, null=True)
     
     committee = models.ForeignKey(Committee)
     number = models.SmallIntegerField()
@@ -235,22 +236,27 @@ class CommitteeMeeting(models.Model):
 
     @property
     def minutes_url(self):
-        return url_from_docid(self.minutes)
+        if not self.minutes:
+            return None
+        return 'http://www.ourcommons.ca/DocumentViewer/{}/{}/{}/meeting-{}/minutes'.format(
+            settings.LANGUAGE_CODE[:2], self.session.id,
+            self.committee.get_acronym(self.session), self.number)
 
     @property
     def notice_url(self):
-        return url_from_docid(self.notice)
-
+        if not self.notice:
+            return None
+        return 'http://www.ourcommons.ca/DocumentViewer/{}/{}/{}/meeting-{}/notice'.format(
+            settings.LANGUAGE_CODE[:2], self.session.id,
+            self.committee.get_acronym(self.session), self.number)
+    
     @property
     def webcast_url(self):
-        return 'http://www.parl.gc.ca/CommitteeBusiness/CommitteeMeetings.aspx?Cmte=%(acronym)s&Mode=1&ControlCallback=pvuWebcast&Parl=%(parliamentnum)d&Ses=%(sessnum)d&Organization=%(acronym)s&MeetingNumber=%(meeting_number)d&Language=%(language)s&NoJavaScript=true' % {
-            'acronym': self.committee.get_acronym(self.session),
-            'parliamentnum': self.session.parliamentnum,
-            'sessnum': self.session.sessnum,
-            'meeting_number': self.number,
-            'language': settings.LANGUAGE_CODE[0].upper()
-        } if self.webcast else None
-
+        if not self.webcast:
+            return None
+        return 'http://www.ourcommons.ca/webcast/{}/{}/{}'.format(
+            self.session.id, self.committee.get_acronym(self.session), self.number)
+    
     @property
     def datetime(self):
         return datetime.datetime.combine(self.date, self.start_time)
@@ -267,7 +273,6 @@ class CommitteeReport(models.Model):
     number = models.SmallIntegerField(blank=True, null=True) # watch this become a char
     name_en = models.CharField(max_length=500)
     name_fr = models.CharField(max_length=500, blank=True)
-
     
     source_id = models.IntegerField(unique=True, db_index=True)
     

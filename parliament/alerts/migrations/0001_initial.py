@@ -1,52 +1,79 @@
-# encoding: utf-8
-import datetime
-from south.db import db
-from south.v2 import SchemaMigration
-from django.db import models
+# -*- coding: utf-8 -*-
+from __future__ import unicode_literals
 
-class Migration(SchemaMigration):
-    
-    def forwards(self, orm):
-        
-        # Adding model 'PoliticianAlert'
-        db.create_table('alerts_politicianalert', (
-            ('active', self.gf('django.db.models.fields.BooleanField')(default=False, blank=True)),
-            ('created', self.gf('django.db.models.fields.DateTimeField')(default=datetime.datetime.now)),
-            ('politician', self.gf('django.db.models.fields.related.ForeignKey')(to=orm['core.Politician'])),
-            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
-            ('email', self.gf('django.db.models.fields.EmailField')(max_length=75)),
-        ))
-        db.send_create_signal('alerts', ['PoliticianAlert'])
-    
-    
-    def backwards(self, orm):
-        
-        # Deleting model 'PoliticianAlert'
-        db.delete_table('alerts_politicianalert')
-    
-    
-    models = {
-        'alerts.politicianalert': {
-            'Meta': {'object_name': 'PoliticianAlert'},
-            'active': ('django.db.models.fields.BooleanField', [], {'default': 'False', 'blank': 'True'}),
-            'created': ('django.db.models.fields.DateTimeField', [], {'default': 'datetime.datetime.now'}),
-            'email': ('django.db.models.fields.EmailField', [], {'max_length': '75'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'politician': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['core.Politician']"})
-        },
-        'core.politician': {
-            'Meta': {'object_name': 'Politician'},
-            'dob': ('django.db.models.fields.DateField', [], {'null': 'True', 'blank': 'True'}),
-            'gender': ('django.db.models.fields.CharField', [], {'max_length': '1', 'blank': 'True'}),
-            'headshot': ('django.db.models.fields.files.ImageField', [], {'max_length': '100', 'null': 'True', 'blank': 'True'}),
-            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
-            'name': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
-            'name_family': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
-            'name_given': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
-            'parlpage': ('django.db.models.fields.URLField', [], {'max_length': '200', 'blank': 'True'}),
-            'site': ('django.db.models.fields.URLField', [], {'max_length': '200', 'blank': 'True'}),
-            'slug': ('django.db.models.fields.CharField', [], {'db_index': 'True', 'max_length': '30', 'blank': 'True'})
-        }
-    }
-    
-    complete_apps = ['alerts']
+from django.db import migrations, models
+import datetime
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('accounts', '0001_initial'),
+        ('core', '0001_initial'),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='PoliticianAlert',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('email', models.EmailField(max_length=254, verbose_name=b'Your e-mail')),
+                ('active', models.BooleanField(default=False)),
+                ('created', models.DateTimeField(default=datetime.datetime.now)),
+                ('politician', models.ForeignKey(to='core.Politician')),
+            ],
+        ),
+        migrations.CreateModel(
+            name='SeenItem',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('item_id', models.CharField(max_length=400, db_index=True)),
+                ('timestamp', models.DateTimeField(default=datetime.datetime.now)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Subscription',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('created', models.DateTimeField(default=datetime.datetime.now)),
+                ('active', models.BooleanField(default=True)),
+                ('last_sent', models.DateTimeField(null=True, blank=True)),
+            ],
+            options={
+                'ordering': ['-created'],
+            },
+        ),
+        migrations.CreateModel(
+            name='Topic',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('query', models.CharField(unique=True, max_length=800)),
+                ('created', models.DateTimeField(default=datetime.datetime.now)),
+                ('last_checked', models.DateTimeField(null=True, blank=True)),
+                ('last_found', models.DateTimeField(null=True, blank=True)),
+            ],
+        ),
+        migrations.AddField(
+            model_name='subscription',
+            name='topic',
+            field=models.ForeignKey(to='alerts.Topic'),
+        ),
+        migrations.AddField(
+            model_name='subscription',
+            name='user',
+            field=models.ForeignKey(to='accounts.User'),
+        ),
+        migrations.AddField(
+            model_name='seenitem',
+            name='topic',
+            field=models.ForeignKey(to='alerts.Topic'),
+        ),
+        migrations.AlterUniqueTogether(
+            name='subscription',
+            unique_together=set([('topic', 'user')]),
+        ),
+        migrations.AlterUniqueTogether(
+            name='seenitem',
+            unique_together=set([('topic', 'item_id')]),
+        ),
+    ]

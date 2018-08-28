@@ -1,70 +1,19 @@
-import urllib, urllib2
-import re
-import httplib2
 import json
+import urllib
+import urllib2
 from functools import wraps
 
 from django.db import models
 from django.conf import settings
 from django.core import urlresolvers
-from django.core.mail import mail_admins
 from django.http import HttpResponsePermanentRedirect
+
+from compressor.filters import CompilerFilter
 
 import logging
 logger = logging.getLogger(__name__)
 
 
-def postcode_to_edid(postcode):
-    # First try Elections Canada
-    postcode = postcode.replace(' ', '')
-    try:
-        #return postcode_to_edid_ec(postcode)
-        return postcode_to_edid_webserv(postcode)
-    except:
-        return postcode_to_edid_represent(postcode)
-
-
-def postcode_to_edid_represent(postcode):
-    url = 'https://represent.opennorth.ca/postcodes/%s/' % postcode
-    try:
-        content = json.load(urllib2.urlopen(url))
-    except urllib2.HTTPError as e:
-        if e.code != 404:
-            logger.exception("Represent error for %s" % url)
-        return None
-    edid = [
-        b['external_id'] for b in
-        content.get('boundaries_concordance', []) + content.get('boundaries_centroid', [])
-        if b['boundary_set_name'] == 'Federal electoral district'
-    ]
-    return int(edid[0]) if edid else None
-
-
-EC_POSTCODE_URL = 'http://elections.ca/scripts/pss/FindED.aspx?L=e&PC=%s'
-r_ec_edid = re.compile(r'&ED=(\d{5})&')
-def postcode_to_edid_ec(postcode):
-    h = httplib2.Http(timeout=1)
-    h.follow_redirects = False
-    (response, content) = h.request(EC_POSTCODE_URL % postcode.replace(' ', ''))
-    match = r_ec_edid.search(response['location'])
-    return int(match.group(1))
-    
-def postcode_to_edid_webserv(postcode):
-    try:
-        response = urllib2.urlopen('http://postal-code-to-edid-webservice.heroku.com/postal_codes/' + postcode)
-    except urllib2.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise e
-    codelist = json.load(response)
-    if not isinstance(codelist, list):
-        mail_admins("Invalid response from postcode service", repr(codelist))
-        raise Exception()
-    if len(codelist) > 1:
-        mail_admins("Multiple results for postcode", postcode + repr(codelist))
-        return None
-    return int(codelist[0])
-    
 def memoize_property(target):
     """Caches the result of a method that takes no arguments."""
     
@@ -150,8 +99,8 @@ def int64_decode(s):
         
 class ActiveManager(models.Manager):
 
-    def get_query_set(self):
-        return super(ActiveManager, self).get_query_set().filter(active=True)
+    def get_queryset(self):
+        return super(ActiveManager, self).get_queryset().filter(active=True)
 
 def feed_wrapper(feed_class):
     """Decorator that ensures django.contrib.syndication.Feed objects are created for
@@ -162,3 +111,15 @@ def feed_wrapper(feed_class):
         feed_instance.request = request
         return feed_instance(request, *args, **kwargs)
     return call_feed
+
+def lang_context(request):
+    return {'fr': settings.LANGUAGE_CODE.startswith('fr')}
+
+class AutoprefixerFilter(CompilerFilter):
+    command = "{binary} {args} -o {outfile} {infile}"
+    options = (
+        ("binary", getattr(settings, "COMPRESS_AUTOPREFIXER_BINARY",
+            './node_modules/.bin/postcss')),
+        ("args", getattr(settings, "COMPRESS_AUTOPREFIXER_ARGS",
+           '--use autoprefixer --autoprefixer.browsers "> 1%"')),
+    )

@@ -1,7 +1,8 @@
+import datetime
 import json
 import re
 
-from django.template import loader, RequestContext
+from django.template import loader
 from django.http import HttpResponse, HttpResponseRedirect, Http404
 from django.shortcuts import get_object_or_404, render
 from django import forms
@@ -27,7 +28,8 @@ class PoliticianAlertForm(forms.Form):
 @disable_on_readonly_db
 def politician_hansard_signup(request):
     try:
-        politician_id = int(re.sub(r'\D', '', request.REQUEST.get('politician', '')))
+        politician_id = int(re.sub(r'\D', '',
+            (request.POST if request.method == 'POST' else request.GET).get('politician', '')))
     except ValueError:
         raise Http404
  
@@ -54,13 +56,13 @@ def politician_hansard_signup(request):
             signed_key = TimestampSigner(salt='alerts_pol_subscribe').sign(key)
             activate_url = urlresolvers.reverse('alerts_pol_subscribe',
                 kwargs={'signed_key': signed_key})
-            activation_context = RequestContext(request, {
+            activation_context = {
                 'pol': pol,
                 'activate_url': activate_url,
-            })
+            }
             t = loader.get_template("alerts/activate.txt")
             send_mail(subject=u'Confirmation required: Email alerts about %s' % pol.name,
-                message=t.render(activation_context),
+                message=t.render(activation_context, request),
                 from_email='alerts@contact.openparliament.ca',
                 recipient_list=[form.cleaned_data['email']])
 
@@ -73,17 +75,18 @@ def politician_hansard_signup(request):
             initial['email'] = request.authenticated_email
         form = PoliticianAlertForm(initial=initial)
         
-    c = RequestContext(request, {
+    c = {
         'form': form,
         'success': success,
         'pol': pol,
         'title': 'Email alerts for %s' % pol.name,
-    })
+    }
     t = loader.get_template("alerts/signup.html")
-    return HttpResponse(t.render(c))
+    return HttpResponse(t.render(c, request))
 
 
 @never_cache
+@disable_on_readonly_db
 def alerts_list(request):
     if not request.authenticated_email:
         return render(request, 'alerts/list_unauthenticated.html',
@@ -98,18 +101,18 @@ def alerts_list(request):
     subscriptions = Subscription.objects.filter(user=user).select_related('topic')
 
     t = loader.get_template('alerts/list.html')
-    c = RequestContext(request, {
-        'user': user,
+    c = {
+        'alerts_user': user,
         'subscriptions': subscriptions,
         'title': 'Your email alerts'
-    })
-    resp = HttpResponse(t.render(c))
-    resp.set_cookie(
-        key='enable-alerts',
-        value='y',
-        max_age=60*60*24*90,
-        httponly=False
-    )
+    }
+    resp = HttpResponse(t.render(c, request))
+    # resp.set_cookie(
+    #     key='enable-alerts',
+    #     value='y',
+    #     max_age=60*60*24*90,
+    #     httponly=False
+    # )
     return resp
 
 
@@ -161,7 +164,7 @@ def politician_hansard_subscribe(request, signed_key):
         'key_error': False
     }
     try:
-        key = TimestampSigner(salt='alerts_pol_subscribe').unsign(signed_key, max_age=60*60*24*14)
+        key = TimestampSigner(salt='alerts_pol_subscribe').unsign(signed_key, max_age=60*60*24*90)
         politician_id, _, email = key.partition(',')
         pol = get_object_or_404(Politician, id=politician_id)
         if not pol.current_member:
@@ -198,18 +201,51 @@ def unsubscribe(request, key):
         ctx['query'] = subscription.topic
     except BadSignature:
         ctx['key_error'] = True
-    c = RequestContext(request, ctx)
     t = loader.get_template("alerts/unsubscribe.html")
-    return HttpResponse(t.render(c))
+    return HttpResponse(t.render(ctx, request))
 
 
+@disable_on_readonly_db
 def bounce_webhook(request):
-    """Simple view to process bounce reports delivered via webhook.
-    (uses the Mandrill API for the moment)"""
-    if 'mandrill_events' not in request.POST:
+    """
+    Simple view to process bounce reports delivered via webhook.
+    
+    Currently support Mandrill and Amazon SES.
+    """
+    sns_message_type = request.META.get('HTTP_X_AMZ_SNS_MESSAGE_TYPE')
+
+    if sns_message_type:
+        try:
+            data = json.loads(json.loads(request.body)['Message'])
+            ntype = data['notificationType']
+            if ntype == 'Bounce':
+                recipients = [b['emailAddress'] for b in data['bounce']['bouncedRecipients']]
+            elif ntype == 'Complaint':
+                recipients = [b['emailAddress'] for b in data['complaint']['complainedRecipients']]
+            else:
+                mail_admins("Unhandled SES notification", request.body)
+                return HttpResponse('OK')
+            
+            for recipient in recipients:
+                if ntype == 'Bounce' and data['bounce']['bounceType'] in ('Transient', 'Undetermined'):
+                    try:
+                        user = User.objects.get(email=recipient)
+                        user.data.setdefault('transient_bounces', []).append(
+                            "{} {}".format(datetime.date.today(), data['bounce']['bounceSubType']))
+                        user.save()
+                    except User.DoesNotExist:
+                        pass
+                else:
+                    User.objects.filter(email=recipient).update(email_bouncing=True,
+                        email_bounce_reason=request.body)
+        except KeyError:
+            mail_admins("Unhandled SES notification", request.body)
+    elif 'mandrill_events' in request.POST:
+        for event in json.loads(request.POST['mandrill_events']):
+            if 'bounce' in event['event']:
+                User.objects.filter(email=event['msg']['email']).update(email_bouncing=True,
+                    email_bounce_reason=json.dumps(event))
+    else:
         raise Http404
 
-    for event in json.loads(request.POST['mandrill_events']):
-        if 'bounce' in event['event']:
-            User.objects.filter(email=event['msg']['email']).update(email_bouncing=True)
     return HttpResponse('OK')

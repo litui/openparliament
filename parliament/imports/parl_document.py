@@ -13,9 +13,11 @@ from xml.sax.saxutils import quoteattr
 
 from django.core import urlresolvers
 from django.db import transaction
+from django.db.models import Max
 
 import alpheus
-from BeautifulSoup import BeautifulSoup
+from lxml import etree
+import requests
 
 from parliament.bills.models import Bill, BillInSession, VoteQuestion
 from parliament.core.models import Politician, ElectedMember, Session
@@ -24,7 +26,7 @@ from parliament.hansards.models import Statement, Document, OldSequenceMapping
 import logging
 logger = logging.getLogger(__name__)
 
-@transaction.commit_on_success
+@transaction.atomic
 def import_document(document, interactive=True, reimport_preserving_sequence=False):
     old_statements = None
     if document.statement_set.all().exists():
@@ -42,7 +44,8 @@ def import_document(document, interactive=True, reimport_preserving_sequence=Fal
                 return
             document.statement_set.all().delete()
 
-    document.download()
+    if not document.downloaded:
+        return False
     xml_en = document.get_cached_xml('en')
     pdoc_en = alpheus.parse_file(xml_en)
     xml_en.close()
@@ -107,41 +110,64 @@ def import_document(document, interactive=True, reimport_preserving_sequence=Fal
     _r_paragraph_id = re.compile(ur'<p[^>]* data-HoCid="(?P<id>\d+)"')
     fr_paragraphs = dict()
     fr_statements = dict()
+    missing_id_count = 0
 
     def _get_paragraph_id(p):
         return int(_r_paragraph_id.match(p).group('id'))
 
+    def _get_paragraphs_and_ids(content):
+        return [(p, _get_paragraph_id(p)) for p in _r_paragraphs.findall(content)]
+
     for st in pdoc_fr.statements:
         if st.meta['id']:
             fr_statements[st.meta['id']] = st
-        for p in _r_paragraphs.findall(st.content):
-            fr_paragraphs[_get_paragraph_id(p)] = p
+        for p, pid in _get_paragraphs_and_ids(st.content):
+            if pid:
+                fr_paragraphs[pid] = p
+            else:
+                missing_id_count += 1
 
     def _substitute_french_content(match):
         try:
-            return fr_paragraphs[_get_paragraph_id(match.group(0))]
+            pid = _get_paragraph_id(match.group(0))
+            if pid:
+                return fr_paragraphs[pid]
+            else:
+                return match.group(0)
         except KeyError:
             logger.error("Paragraph ID %s not found in French for %s" % (match.group(0), document))
             return match.group(0)
 
-    for st in statements:
-        st.content_fr = _process_related_links(
-            _r_paragraphs.sub(_substitute_french_content, st.content_en),
-            st
-        )
-        fr_data = fr_statements.get(st.source_id)
-        if fr_data:
-            st.h1_fr = fr_data.meta.get('h1', '')
-            st.h2_fr = fr_data.meta.get('h2', '')
-            st.h3_fr = fr_data.meta.get('h3', '')
-            if st.h1_fr and not st.h2_fr:
-                st.h2_fr = s.h3_fr
-                st.h3_fr = ''
-            st.who_fr = fr_data.meta.get('person_attribution', '')
-            st.who_context_fr = fr_data.meta.get('person_context', '')
-
-
-    document.multilingual = True
+    if missing_id_count > float(len(fr_paragraphs)):
+        logger.error("French paragraphs not available")
+        document.multilingual = False
+    else:
+        document.multilingual = True
+        for st in statements:
+            fr_data = fr_statements.get(st.source_id)
+            pids_en = [pid for p, pid in _get_paragraphs_and_ids(st.content_en)]
+            pids_fr = [pid for p, pid in _get_paragraphs_and_ids(fr_data.content)] if fr_data else None
+            if fr_data and pids_en == pids_fr:
+                # Match by statement
+                st.content_fr = _process_related_links(fr_data.content, st)
+            elif all(pids_en):
+                # Match by paragraph
+                st.content_fr = _process_related_links(
+                    _r_paragraphs.sub(_substitute_french_content, st.content_en),
+                    st
+                )
+            else:
+                logger.warning("Could not do multilingual match of statement %s", st.source_id)
+                document.multilingual = False
+            if fr_data:
+                st.h1_fr = fr_data.meta.get('h1', '')
+                st.h2_fr = fr_data.meta.get('h2', '')
+                st.h3_fr = fr_data.meta.get('h3', '')
+                if st.h1_fr and not st.h2_fr:
+                    st.h2_fr = s.h3_fr
+                    st.h3_fr = ''
+                st.who_fr = fr_data.meta.get('person_attribution', '')
+                st.who_context_fr = fr_data.meta.get('person_context', '')
 
     Statement.set_slugs(statements)
 
@@ -269,7 +295,7 @@ def _process_related_link(match, statement):
         except VoteQuestion.DoesNotExist:
             # We'll just operate on faith that the vote will soon
             # be created
-            url = urlresolvers.reverse('parliament.bills.views.vote',
+            url = urlresolvers.reverse('vote',
                 kwargs={'session_id': statement.document.session_id, 'number': params['number']})
             title = None
     else:
@@ -289,29 +315,101 @@ def _build_tag(name, attrs):
         u''.join([u" %s=%s" % (k, quoteattr(unicode(v))) for k,v in sorted(attrs.items())])
     )
 
-def _docid_from_url(u):
-    return int(re.search(r'DocId=(\d+)', u).group(1))
+def _test_has_paragraph_ids(elem):
+    """Do all, or almost all, of the paragraphs in this document have ID attributes? 
+    Sometimes they're missing at first."""
+    paratext = elem.xpath('//ParaText')
+    paratext_with_id = [pt for pt in paratext if pt.get('id')]
+    return (len(paratext_with_id) / float(len(paratext))) > 0.95
+
+HANSARD_URL = 'http://www.ourcommons.ca/Content/House/{parliamentnum}{sessnum}/Debates/{sitting:03d}/HAN{sitting:03d}-{lang}.XML'
+
+class NoDocumentFound(Exception):
+    pass
 
 def fetch_latest_debates(session=None):
     if not session:
         session = Session.objects.current()
 
-    url = 'http://www2.parl.gc.ca/housechamberbusiness/chambersittings.aspx?View=H&Parl=%d&Ses=%d&Language=E&Mode=2' % (
-        session.parliamentnum, session.sessnum)
-    soup = BeautifulSoup(urllib2.urlopen(url))
+    sittings = Document.objects.filter(
+        document_type=Document.DEBATE, session=session).values_list(
+        'number', flat=True)
+    # FIXME at the moment ourcommons.ca doesn't make it easy to get a list of
+    # debates; this is a quick temporary solution that will break on special
+    # sittings like 128-B
+    if len(sittings) == 0:
+        max_sitting = 0
+    else:
+        max_sitting = max(int(n) for n in sittings if n.isdigit())
 
-    cal = soup.find('div', id='ctl00_PageContent_calTextCalendar')
-    for link in cal.findAll('a', href=True):
-        source_id = _docid_from_url(link['href'])
-        if not Document.objects.filter(source_id=source_id).exists():
-            Document.objects.create(
-                document_type=Document.DEBATE,
-                session=session,
-                source_id=source_id
-            )
+    while True:
+        max_sitting += 1
+        try:
+            fetch_debate_for_sitting(session, max_sitting)
+        except NoDocumentFound:
+            break
 
 
+def fetch_debate_for_sitting(session, sitting_number, import_without_paragraph_ids=False):
+    url = HANSARD_URL.format(parliamentnum=session.parliamentnum,
+        sessnum=session.sessnum, sitting=sitting_number, lang='E')
+    resp = requests.get(url)
+    if resp.status_code != 200:
+        if resp.status_code != 404:
+            logger.error("Response %d from %s", resp.status_code, url)
+        raise NoDocumentFound
+    print url
 
+    xml_en = resp.content
+    url = HANSARD_URL.format(parliamentnum=session.parliamentnum,
+        sessnum=session.sessnum, sitting=sitting_number, lang='F')
+    resp = requests.get(url)
+    resp.raise_for_status()
+    xml_fr = resp.content
 
-        
+    doc_en = etree.fromstring(xml_en)
+    doc_fr = etree.fromstring(xml_fr)
 
+    source_id = int(doc_en.get('id'))
+    if Document.objects.filter(source_id=source_id).exists():
+        raise Exception("Document at source_id %s already exists but not sitting %s" %
+            (source_id, sitting_number))
+    assert int(doc_fr.get('id')) == source_id
+
+    if ((not import_without_paragraph_ids) and
+            not (_test_has_paragraph_ids(doc_en) and _test_has_paragraph_ids(doc_fr))):
+        logger.warning("Missing paragraph IDs, cancelling")
+        return
+
+    with transaction.atomic():
+        doc = Document.objects.create(
+            document_type=Document.DEBATE,
+            session=session,
+            source_id=source_id,
+            number=str(sitting_number)
+        )
+        doc.save_xml(xml_en, xml_fr)
+        logger.info("Saved sitting %s", doc.number)
+
+def refresh_xml(document):
+    """
+    Download new XML from Parliament, reimport.
+    """
+    if document.document_type == Document.DEBATE:
+        url_en = HANSARD_URL.format(parliamentnum=document.session.parliamentnum,
+            sessnum=document.session.sessnum, sitting=int(document.number), lang='E')
+        url_fr = HANSARD_URL.format(parliamentnum=document.session.parliamentnum,
+            sessnum=document.session.sessnum, sitting=int(document.number), lang='F')
+    else:
+        raise NotImplementedError
+
+    resp_en = requests.get(url_en)
+    resp_en.raise_for_status()
+    xml_en = resp_en.content
+
+    resp_fr = requests.get(url_fr)
+    resp_fr.raise_for_status()
+    xml_fr = resp_fr.content
+
+    document.save_xml(xml_en, xml_fr, overwrite=True)
+    import_document(document)
